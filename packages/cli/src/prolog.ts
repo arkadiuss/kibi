@@ -489,19 +489,27 @@ export class PrologProcess {
         };
         const timeoutId = setTimeout(() => {
           const stage = this.lastDiagnosticStage(this.errorBuffer) ?? "unknown";
-          const msg = `Query timeout after ${this.timeout / 1000}s (stage=${stage}, pid=${child.pid ?? 0}, killed=${child.killed ? "yes" : "no"}, exitCode=${child.exitCode}, signal=${child.signalCode}, goal=${goalLabel}). If several fresh Kibi commands hang or crawl the same way, the engine state is likely wedged: run 'kibi engine stop' (then 'kibi sync --rebuild' if needed) and retry.`;
-          if (debug) {
-            console.error(`[prolog debug] timeout: ${msg}`);
-            const runtime = this.errorBuffer
-              .split("\n")
-              .find((line) => line.includes("__KIBI_RUNTIME__"));
-            console.error(
-              `[prolog debug] runtime=${runtime ?? "unknown"} packages=${kibiPackageVersions()}`,
-            );
-          }
           settle();
           this.terminationReason = `query timeout: ${goalLabel}`;
+          // Describe the process only after it has been stopped: read before
+          // terminate(), exitCode and signal are still null and the message
+          // would say a stopped process is running.
           void this.terminate().finally(() => {
+            const stopped =
+              child.exitCode !== null || child.signalCode !== null;
+            const state = stopped
+              ? `its Prolog process was stopped (exitCode=${child.exitCode}, signal=${child.signalCode}) and the engine starts a fresh session for its next request`
+              : "its Prolog process did not stop after SIGTERM and SIGKILL";
+            const msg = `Query timeout after ${this.timeout / 1000}s (stage=${stage}, pid=${child.pid ?? 0}, goal=${goalLabel}); ${state}. If several fresh Kibi commands hang or crawl the same way, run 'kibi engine stop' (then 'kibi sync --rebuild' if needed) and retry.`;
+            if (debug) {
+              console.error(`[prolog debug] timeout: ${msg}`);
+              const runtime = this.errorBuffer
+                .split("\n")
+                .find((line) => line.includes("__KIBI_RUNTIME__"));
+              console.error(
+                `[prolog debug] runtime=${runtime ?? "unknown"} packages=${kibiPackageVersions()}`,
+              );
+            }
             reject(new Error(msg));
           });
         }, this.timeout);

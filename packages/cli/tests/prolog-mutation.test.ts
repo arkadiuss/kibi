@@ -980,7 +980,7 @@ describe("interactive queries", () => {
       .query("kb_wait(x)")
       .catch((e: Error) => e.message);
     expect(message).toBe(
-      `Query timeout after 0.03s (stage=load, pid=${child.pid}, killed=no, exitCode=null, signal=null, goal=kb_wait). If several fresh Kibi commands hang or crawl the same way, the engine state is likely wedged: run 'kibi engine stop' (then 'kibi sync --rebuild' if needed) and retry.`,
+      `Query timeout after 0.03s (stage=load, pid=${child.pid}, goal=kb_wait); its Prolog process was stopped (exitCode=null, signal=SIGTERM) and the engine starts a fresh session for its next request. If several fresh Kibi commands hang or crawl the same way, run 'kibi engine stop' (then 'kibi sync --rebuild' if needed) and retry.`,
     );
     expect(logs).toStrictEqual([
       "[prolog debug] start query: kb_wait",
@@ -1705,6 +1705,21 @@ describe("edge cases", () => {
     expect(logs).toStrictEqual([]);
   });
 
+  test("report a process that survives the timeout stop as still running", async () => {
+    const { prolog, child } = await started(() => ({ silent: true }), {
+      timeout: 20,
+    });
+    child.closeOnSignal = false;
+    const message = (await prolog
+      .query("kb_stuck")
+      .catch((e: Error) => e.message)) as string;
+    expect(child.kills).toStrictEqual(["SIGTERM", "SIGKILL"]);
+    expect(message).toContain(
+      "goal=kb_stuck); its Prolog process did not stop after SIGTERM and SIGKILL.",
+    );
+    expect(message).not.toContain("killed=");
+  });
+
   test("describe a killed process in the timeout", async () => {
     const { prolog, child } = await started(() => ({ silent: true }), {
       timeout: 20,
@@ -1720,7 +1735,7 @@ describe("edge cases", () => {
       .catch((e: Error) => e.message)) as string;
     expect(
       message.startsWith(
-        "Query timeout after 0.02s (stage=unknown, pid=0, killed=yes, exitCode=2, signal=SIGINT, goal=kb_t).",
+        "Query timeout after 0.02s (stage=unknown, pid=0, goal=kb_t); its Prolog process was stopped (exitCode=2, signal=SIGINT) and the engine starts a fresh session for its next request.",
       ),
     ).toBe(true);
   });
