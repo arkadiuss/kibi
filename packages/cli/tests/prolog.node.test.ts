@@ -63,6 +63,52 @@ test("interactive mode smoke test (Node) - start/attach/assert/query/detach", as
   }
 });
 
+// A mutating goal is saved after it (kb_save appended) by default, and not
+// when persistMutations is false: the staged check's throwaway KB, which is
+// never read back from disk, would otherwise rewrite the whole store after
+// every projected batch, quadratic in the KB's size.
+for (const [label, options, saved] of [
+  ["by default", {}, true],
+  ["unless persistMutations is false", { persistMutations: false }, false],
+] as const) {
+  test(`interactive mutating goals are saved ${label}`, async () => {
+    const tempKbDir = mkdtempSync(path.join(os.tmpdir(), "kibi-node-persist-"));
+    const prolog = createInteractiveProlog(options);
+    try {
+      await prolog.start();
+      const attach = await prolog.query(`kb_attach('${tempKbDir}')`);
+      assert.strictEqual(attach.success, true, "kb_attach should succeed");
+      const write = await prolog.query(
+        `kb_assert_entity(req, [id='REQ-NODE-PERSIST', title="Persist", status=active, created_at="2026-11-13T00:00:00Z", updated_at="2026-11-13T00:00:00Z", source="node-test"])`,
+      );
+      assert.strictEqual(
+        write.success,
+        true,
+        "kb_assert_entity should succeed",
+      );
+      const rdfPath = path.join(tempKbDir, "kb.rdf");
+      const hasEntity =
+        existsSync(rdfPath) &&
+        readFileSync(rdfPath, "utf8").includes("REQ-NODE-PERSIST");
+      assert.strictEqual(
+        hasEntity,
+        saved,
+        `kb.rdf holds the entity: ${hasEntity}`,
+      );
+      const read = await prolog.query("kb_entity('REQ-NODE-PERSIST', _, _)");
+      assert.strictEqual(
+        read.success,
+        true,
+        "the entity is queryable either way",
+      );
+    } finally {
+      await prolog.query("kb_detach").catch(() => undefined);
+      await prolog.terminate();
+      rmSync(tempKbDir, { recursive: true, force: true });
+    }
+  });
+}
+
 test("opt-in timing trace separates query round trips from cache hits without masking failures", async () => {
   const traceDir = mkdtempSync(path.join(os.tmpdir(), "kibi-prolog-trace-"));
   const priorEnabled = process.env.KIBI_PERF_TIMINGS;

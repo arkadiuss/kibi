@@ -136,6 +136,13 @@ export interface PrologOptions {
    * a small cap to exercise the overflow path deterministically.
    */
   maxOutputBytes?: number;
+  /**
+   * Whether a mutating query also saves the store (`kb_save`). Defaults to
+   * true. A process whose KB is never read back from disk, such as the staged
+   * check's throwaway KB, passes false: `kb_save` rewrites the whole store, so
+   * saving after every batch makes projecting a KB quadratic in its size.
+   */
+  persistMutations?: boolean;
 }
 
 /**
@@ -196,6 +203,7 @@ export class PrologProcess {
   private explicitSwiplPath: string | undefined;
   private readonly swiplResolver: () => ResolvedSwipl;
   private timeout: number;
+  private readonly persistMutations: boolean;
   // start() resets these before any output can arrive.
   private outputBuffer!: string;
   private outputBufferBytes!: number;
@@ -226,6 +234,7 @@ export class PrologProcess {
     this.explicitSwiplPath = options.swiplPath || undefined;
     this.swiplResolver = options.swiplResolver ?? (() => resolveSwipl());
     this.timeout = options.timeout || 30000;
+    this.persistMutations = options.persistMutations !== false;
     const maxOutputBytes = Number(options.maxOutputBytes);
     this.maxOutputBytes =
       Number.isInteger(maxOutputBytes) && maxOutputBytes > 0
@@ -456,6 +465,7 @@ export class PrologProcess {
       const normalizedGoal = this.normalizeGoal(goal as string);
       const goalLabel = this.goalLabel(normalizedGoal);
       const shouldPersist =
+        this.persistMutations &&
         this.isMutatingGoal(normalizedGoal) &&
         !normalizedGoal.includes("kb_save") &&
         !normalizedGoal.includes("kb_commit_upsert");
